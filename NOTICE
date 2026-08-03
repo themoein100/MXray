@@ -1,0 +1,27 @@
+MXray
+Copyright 2026 The MXray Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+This product includes and depends on third-party software:
+
+1. Xray-core / LibXray
+   Copyright (c) 2023-2025 XTLS
+   Licensed under the MIT License.
+   https://github.com/XTLS/Xray-core
+   https://github.com/XTLS/libXray
+
+   The prebuilt `LibXray.xcframework` distributed with MXray releases is compiled
+   from LibXray, which embeds Xray-core. Its full license text is available at
+   the URLs above.
+
+2. Portions of the Swift wrapper (the Xray core bridge, packet-flow bridge, geo
+   file loader and tuning presets) are derived from SwiftyXrayKit, licensed under
+   the Apache License, Version 2.0.
+
+--------------------------------------------------------------------------------
+Geo data files (geoip.dat / geosite.dat) are NOT distributed with MXray. They are
+downloaded at runtime from community sources such as:
+   https://github.com/Loyalsoldier/v2ray-rules-dat
+and are subject to their own respective licenses.

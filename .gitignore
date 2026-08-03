@@ -1,0 +1,15 @@
+# Xcode / SwiftPM build artifacts
+.build/
+.build-ios/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# The LibXray binary is distributed via GitHub Releases, never committed
+# (each slice exceeds GitHub's 100 MB per-file limit).
+Frameworks/LibXray.xcframework
+Frameworks/*.zip
+
+# macOS
+.DS_Store
