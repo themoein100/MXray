@@ -78,7 +78,7 @@ your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/<owner>/MXray.git", from: "1.0.0")
+    .package(url: "https://github.com/themoein100/MXray.git", from: "1.0.0")
 ]
 ```
 
@@ -226,7 +226,7 @@ handled.
 
 ## License
 
-MXray is licensed under the [Apache License 2.0](LICENSE).
+Copyright © 2026 Moein. MXray is licensed under the [Apache License 2.0](LICENSE).
 
 It embeds and builds on third-party software — most importantly **Xray-core / LibXray**
 (© XTLS, MIT). See [NOTICE](NOTICE) for full attribution. Vulnerabilities in Xray-core

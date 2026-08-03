@@ -2,6 +2,7 @@
 //  TunnelMessage.swift
 //  MXray
 //
+//  Copyright 2026 Moein
 //  SPDX-License-Identifier: Apache-2.0
 //
 //  A tiny request/response protocol carried over

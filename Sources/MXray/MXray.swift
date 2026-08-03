@@ -2,6 +2,7 @@
 //  MXray.swift
 //  MXray
 //
+//  Copyright 2026 Moein
 //  SPDX-License-Identifier: Apache-2.0
 //
 

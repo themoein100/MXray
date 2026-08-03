@@ -2,6 +2,7 @@
 //  XrayBridge.swift
 //  MXray
 //
+//  Copyright 2026 Moein
 //  SPDX-License-Identifier: Apache-2.0
 //
 //  Bridges NEPacketTunnelFlow ↔ Xray's built-in gVisor `tun` inbound.
