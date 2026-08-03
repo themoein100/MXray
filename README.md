@@ -207,16 +207,25 @@ let ports   = try MXray.freePorts(2)
 
 ## Cutting a release
 
-Produce the binary asset and its checksum:
+When `LibXray.xcframework` is rebuilt upstream, one command ships a new version — it zips
+the framework, computes the checksum, rewrites the `url` + `checksum` in `Package.swift`,
+commits and pushes, then creates the GitHub Release with the asset attached:
 
 ```bash
-# From the folder containing LibXray.xcframework
+Scripts/release.sh 1.0.1 ~/libXray-apple/LibXray.xcframework
+```
+
+(The second argument is optional; it defaults to `Frameworks/LibXray.xcframework`.)
+
+Prefer to do it by hand? Produce the asset and checksum yourself:
+
+```bash
 ditto -c -k --sequesterRsrc --keepParent LibXray.xcframework LibXray.xcframework.zip
 swift package compute-checksum LibXray.xcframework.zip
 ```
 
-Upload `LibXray.xcframework.zip` to a GitHub Release, then switch `Package.swift` to the
-`.binaryTarget(url:checksum:)` variant with that release URL and checksum.
+then upload the zip to a GitHub Release and set the matching `url` + `checksum` in the
+`.binaryTarget(url:checksum:)` at the top of `Package.swift`.
 
 ## Security
 
