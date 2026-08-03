@@ -227,6 +227,15 @@ swift package compute-checksum LibXray.xcframework.zip
 then upload the zip to a GitHub Release and set the matching `url` + `checksum` in the
 `.binaryTarget(url:checksum:)` at the top of `Package.swift`.
 
+### Automated releases
+
+A scheduled GitHub Actions workflow ([`auto-update-libxray.yml`](.github/workflows/auto-update-libxray.yml))
+keeps MXray tracking upstream Xray-core with no human in the loop. Weekly, it builds
+`LibXray.xcframework` from source ([themoein100/libXray-apple](https://github.com/themoein100/libXray-apple))
+on a macOS runner against the latest Xray-core, and — when the version changed — updates
+`Package.swift`, commits, and publishes a new release with the framework attached. You can
+also run it on demand from the **Actions** tab (optionally pinning a specific Xray-core version).
+
 ## Security
 
 Full-tunnel by default, no telemetry, no embedded secrets. See [SECURITY.md](SECURITY.md)

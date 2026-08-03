@@ -1,0 +1,170 @@
+name: Auto-update LibXray
+
+# Keeps MXray tracking the latest Xray-core, forever, with no human in the loop.
+#
+# Weekly (and on manual dispatch) this:
+#   1. checks out the LibXray source (themoein100/libXray-apple)
+#   2. bumps Xray-core to the latest release and builds LibXray.xcframework on a macOS runner
+#   3. if the Xray-core version changed since the last MXray release, it zips the framework,
+#      updates Package.swift, commits + pushes to this repo, and publishes a new GitHub Release
+#      with the framework attached.
+#
+# It writes only to THIS repository, using the built-in GITHUB_TOKEN — no personal token needed.
+# Because it commits when there is something new, the scheduled trigger never goes stale.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"          # every Monday 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      xray_ref:
+        description: "Xray-core version to build (e.g. v1.8.24). Blank = latest release."
+        required: false
+        default: ""
+      force:
+        description: "Release even if the Xray-core version is unchanged."
+        type: boolean
+        default: false
+
+permissions:
+  contents: write               # commit Package.swift + create releases
+
+concurrency:
+  group: auto-update-libxray
+  cancel-in-progress: false
+
+env:
+  LIBXRAY_REPO: themoein100/libXray-apple
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout MXray
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # need tags to compute the next version
+
+      - name: Checkout LibXray source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBXRAY_REPO }}
+          path: libxray-src
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: libxray-src/go.mod
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bump Xray-core to target version
+        id: xray
+        working-directory: libxray-src
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.xray_ref }}"
+          if [ -z "$REF" ]; then REF="latest"; fi
+          echo "Requesting xray-core@$REF"
+          go get "github.com/xtls/xray-core@$REF"
+          go mod tidy
+          VERSION="$(go list -m -f '{{.Version}}' github.com/xtls/xray-core)"
+          echo "Resolved xray-core version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether a new release is needed
+        id: decide
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.xray.outputs.version }}"
+          CURRENT="$(cat .xray-version 2>/dev/null | tr -d '[:space:]')"
+          echo "current=$CURRENT new=$NEW"
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$NEW" != "$CURRENT" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change — already on $CURRENT."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build LibXray.xcframework
+        if: steps.decide.outputs.proceed == 'true'
+        working-directory: libxray-src/build
+        run: |
+          set -euo pipefail
+          python3 main.py apple gomobile
+
+      - name: Package, update Package.swift, commit, release
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          XCFRAMEWORK="libxray-src/LibXray.xcframework"
+          test -d "$XCFRAMEWORK" || { echo "::error::xcframework not produced"; exit 1; }
+
+          # Next MXray version = latest vX.Y.Z tag with the patch bumped.
+          LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+          LATEST_TAG="${LATEST_TAG:-v1.0.0}"
+          BASE="${LATEST_TAG#v}"
+          MAJOR="${BASE%%.*}"; REST="${BASE#*.}"; MINOR="${REST%%.*}"; PATCH="${REST#*.}"
+          NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo "Next MXray release: $NEXT (was $LATEST_TAG)"
+
+          # Zip + checksum.
+          ZIP="LibXray.xcframework.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$XCFRAMEWORK" "$ZIP"
+          CHECKSUM="$(swift package compute-checksum "$ZIP")"
+          ASSET_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${NEXT}/LibXray.xcframework.zip"
+          echo "checksum=$CHECKSUM"
+
+          # Rewrite Package.swift url + checksum (only the active binaryTarget).
+          sed -i '' -E "s#(releases/download/)v[0-9]+\.[0-9]+\.[0-9]+(/LibXray\.xcframework\.zip)#\1${NEXT}\2#" Package.swift
+          sed -i '' -E "s#(checksum: \")[0-9a-f]{64}(\")#\1${CHECKSUM}\2#" Package.swift
+          grep -q "${NEXT}/LibXray.xcframework.zip" Package.swift
+          grep -q "${CHECKSUM}" Package.swift
+
+          # Record the Xray-core version we shipped.
+          echo "${{ steps.xray.outputs.version }}" > .xray-version
+
+          # Commit + push.
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Package.swift .xray-version
+          git commit -m "Auto-release ${NEXT}: Xray-core ${{ steps.xray.outputs.version }}"
+          git push origin HEAD:${GITHUB_REF_NAME}
+
+          # Build the release notes in a file (keeps all lines inside this YAML block).
+          VER="${{ steps.xray.outputs.version }}"
+          {
+            echo "Automated release built from Xray-core \`${VER}\`."
+            echo ""
+            echo "Consume with:"
+            echo '```swift'
+            echo ".package(url: \"https://github.com/${GITHUB_REPOSITORY}.git\", from: \"${NEXT#v}\")"
+            echo '```'
+            echo ""
+            echo "LibXray.xcframework.zip SwiftPM checksum:"
+            echo "\`${CHECKSUM}\`"
+          } > release-notes.md
+
+          # Publish the release with the framework attached (this also creates the tag).
+          gh release create "$NEXT" \
+            --title "MXray $NEXT" \
+            --target "$(git rev-parse HEAD)" \
+            --notes-file release-notes.md \
+            "$ZIP"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.decide.outputs.proceed }}" = "true" ]; then
+            echo "Released a new build for xray-core ${{ steps.xray.outputs.version }}." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No update needed (xray-core ${{ steps.xray.outputs.version }} already released)." >> "$GITHUB_STEP_SUMMARY"
+          fi

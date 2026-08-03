@@ -11,5 +11,10 @@ xcuserdata/
 Frameworks/LibXray.xcframework
 Frameworks/*.zip
 
+# Transient files produced by the auto-release workflow
+/LibXray.xcframework.zip
+/release-notes.md
+/libxray-src/
+
 # macOS
 .DS_Store
