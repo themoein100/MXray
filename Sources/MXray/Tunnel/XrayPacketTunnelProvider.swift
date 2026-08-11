@@ -125,6 +125,15 @@ open class XrayPacketTunnelProvider: NEPacketTunnelProvider {
 
                 let bridge = XrayBridge(packetFlow: self.packetFlow)
                 bridge.tunMTU = settings.mtu
+                // A dead packet path cannot be repaired in place, and it does not look like a
+                // failure from the outside: Xray stays up and the session stays `.connected` while
+                // nothing is delivered. Ending the session is what lets iOS (or the user) start a
+                // new one; subclasses that would rather reconnect can override `packetPathDidFail`.
+                bridge.onPacketPathFailure = { [weak self] reason in
+                    guard let self else { return }
+                    os_log("packet path failed: %{public}@", log: self.log, type: .error, reason)
+                    self.packetPathDidFail(reason: reason)
+                }
                 self.bridge = bridge
 
                 do {
@@ -145,6 +154,15 @@ open class XrayPacketTunnelProvider: NEPacketTunnelProvider {
                 }
             }
         }
+    }
+
+    /// Called when a packet direction has stopped carrying traffic and cannot recover.
+    ///
+    /// The default ends the session with `.unrecoverableNetworkChange`, so the tunnel stops
+    /// claiming to be connected. Override to reconnect instead, or to report it first — the
+    /// bridge is already unusable by the time this runs, in either direction.
+    open func packetPathDidFail(reason: String) {
+        cancelTunnelWithError(MXrayError.packetPathFailed(reason))
     }
 
     open override func stopTunnel(

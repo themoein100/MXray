@@ -25,6 +25,9 @@ public enum MXrayError: Error, LocalizedError {
     /// The `socketpair()` backing the packet bridge could not be created.
     case socketPairFailed
 
+    /// A packet direction stopped carrying traffic and its framing cannot be resynchronised.
+    case packetPathFailed(String)
+
     public var errorDescription: String? {
         switch self {
         case .invalidResponse(let response):
@@ -37,6 +40,8 @@ public enum MXrayError: Error, LocalizedError {
             return "Tunnel setup error: \(message)"
         case .socketPairFailed:
             return "Failed to create the packet bridge socket pair"
+        case .packetPathFailed(let reason):
+            return "Packet path failed: \(reason)"
         }
     }
 }

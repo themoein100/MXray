@@ -36,6 +36,22 @@ public final class XrayBridge {
     /// apps work but images and video never load".
     public var tunMTU: Int = 1500
 
+    /// Called when a packet path stops carrying traffic for good, with a human-readable reason.
+    ///
+    /// Both directions are framed as `[4-byte AF][IP packet]` over a SOCK_STREAM socketpair, and a
+    /// stream socket has no delimiter to resynchronise on: one truncated frame or one hard socket
+    /// error and every following byte is misread. The reader cannot recover from that, so it stops.
+    ///
+    /// The failure this reports is invisible from the outside, which is what makes it worth
+    /// reporting. Xray keeps running, the uplink keeps accepting packets, `NEVPNStatus` stays
+    /// `.connected` — the tunnel just never delivers another byte to the app. On screen that is a
+    /// video frozen on its first frame, a feed stuck half-loaded, a page that never finishes:
+    /// whatever had already arrived stays, and nothing new does.
+    ///
+    /// Handle it by tearing the tunnel down and reconnecting; nothing can repair the framing in
+    /// place. The callback runs on the reader thread.
+    public var onPacketPathFailure: ((String) -> Void)?
+
     private static let bridgeLog = OSLog(
         subsystem: Bundle.main.bundleIdentifier ?? "MXray.XrayBridge",
         category: "XrayBridge"
@@ -225,12 +241,20 @@ public final class XrayBridge {
             maxPacketsPerBatch: Self.maxPacketsPerBatch
         )
         Thread.detachNewThread { [weak self] in
-            pump.run { delivered in
+            var deliveredTotal: Int64 = 0
+            let stop = pump.run { delivered in
+                deliveredTotal += delivered
                 guard let self else { return }
                 self.statsLock.lock()
                 self._bytesReceived += delivered
                 self.statsLock.unlock()
             }
+            guard let self else { return }
+            let reason = "downlink reader stopped: \(stop.description) afterBytes=\(deliveredTotal)"
+            os_log("%{public}@", log: Self.bridgeLog, type: .error, reason)
+            // Only a clean EOF is expected here, and only while tearing the tunnel down.
+            if case .endOfStream = stop, !self.isRunning { return }
+            self.onPacketPathFailure?(reason)
         }
     }
 
@@ -275,6 +299,7 @@ public final class XrayBridge {
                     // A stream socket may accept less than the whole buffer, and a short write here
                     // would desynchronise the framing the reader on the Xray side depends on — so
                     // keep going until it is all in.
+                    var writeFailure: String?
                     frame.withUnsafeBytes { raw in
                         guard let base = raw.baseAddress else { return }
                         var written = 0
@@ -285,9 +310,20 @@ public final class XrayBridge {
                             } else if n < 0 && (errno == EINTR || errno == EAGAIN) {
                                 continue
                             } else {
+                                // Giving up mid-buffer leaves a partial frame in the stream, and
+                                // Xray's reader has no delimiter to resynchronise on either — from
+                                // here on it misreads every packet the device sends. Nothing can
+                                // repair that in place, so report it rather than let the tunnel
+                                // carry on looking connected.
+                                writeFailure = "uplink write failed: errno=\(errno) written=\(written)/\(raw.count)"
                                 break
                             }
                         }
+                    }
+
+                    if let writeFailure {
+                        os_log("%{public}@", log: Self.bridgeLog, type: .error, writeFailure)
+                        self.onPacketPathFailure?(writeFailure)
                     }
 
                     self.statsLock.lock()
@@ -420,24 +456,49 @@ private final class DownlinkPump {
         buf.deallocate()
     }
 
-    func run(recordReceived: (Int64) -> Void) {
-        while true {
-            var keepRunning = true
-            autoreleasepool {
-                keepRunning = step(recordReceived: recordReceived)
+    /// Why the reader stopped. Every case is terminal: the framing cannot be resynchronised.
+    enum StopReason {
+        /// The socket reported EOF — expected only while the tunnel is being torn down.
+        case endOfStream
+        /// A frame header that cannot be parsed, so every following byte is misaligned.
+        case desynchronised(detail: String)
+        /// `recv` failed with something other than EINTR/EAGAIN.
+        case socketError(code: Int32)
+
+        var description: String {
+            switch self {
+            case .endOfStream:
+                return "end-of-stream"
+            case .desynchronised(let detail):
+                return "framing-desynchronised(\(detail))"
+            case .socketError(let code):
+                return "recv-failed(errno=\(code))"
             }
-            if !keepRunning { return }
+        }
+    }
+
+    func run(recordReceived: (Int64) -> Void) -> StopReason {
+        while true {
+            var stop: StopReason?
+            autoreleasepool {
+                stop = step(recordReceived: recordReceived)
+            }
+            if let stop { return stop }
         }
     }
 
     /// One pass: parse what is buffered, then either top up without blocking or park on the
-    /// socket. Returns false when the stream has ended or desynchronised.
-    private func step(recordReceived: (Int64) -> Void) -> Bool {
+    /// socket. Returns a reason once the stream has ended or desynchronised, nil to keep going.
+    private func step(recordReceived: (Int64) -> Void) -> StopReason? {
         var offset = 0
         var consumed: Int64 = 0
         while packets.count < maxPacketsPerBatch {
             guard let length = frameLength(at: offset) else { break }
-            guard length > 0 else { return false }
+            guard length > 0 else {
+                let af = addressFamily(at: offset)
+                flush()
+                return .desynchronised(detail: "af=\(af) offset=\(offset) filled=\(filled)")
+            }
             packets.append(Data(bytes: buf + offset + 4, count: length - 4))
             protocols.append(NSNumber(value: addressFamily(at: offset)))
             consumed += Int64(length - 4)
@@ -454,7 +515,7 @@ private final class DownlinkPump {
 
         if packets.count >= maxPacketsPerBatch {
             flush()
-            return true
+            return nil
         }
 
         // Nothing more can be parsed. Top the buffer up without blocking so a burst already sitting
@@ -463,19 +524,19 @@ private final class DownlinkPump {
             let n = Darwin.recv(fd, buf + filled, capacity - filled, Int32(MSG_DONTWAIT))
             if n > 0 {
                 filled += n
-                return true
+                return nil
             }
             if n == 0 {
                 flush()
-                return false
+                return .endOfStream
             }
             let err = errno
             if err == EINTR {
-                return true
+                return nil
             }
             if err != EAGAIN && err != EWOULDBLOCK {
                 flush()
-                return false
+                return .socketError(code: err)
             }
         }
 
@@ -484,17 +545,20 @@ private final class DownlinkPump {
 
         // A frame is at most 4 + 65535 bytes, far below `capacity`, so a full buffer with nothing
         // parseable means the stream desynchronised and cannot be recovered.
-        guard filled < capacity else { return false }
+        guard filled < capacity else {
+            return .desynchronised(detail: "buffer-full-unparseable filled=\(filled)")
+        }
 
         let n = Darwin.recv(fd, buf + filled, capacity - filled, 0)
         if n > 0 {
             filled += n
-            return true
+            return nil
         }
         if n == 0 {
-            return false
+            return .endOfStream
         }
-        return errno == EINTR || errno == EAGAIN
+        let err = errno
+        return (err == EINTR || err == EAGAIN) ? nil : .socketError(code: err)
     }
 
     private func addressFamily(at offset: Int) -> UInt32 {
