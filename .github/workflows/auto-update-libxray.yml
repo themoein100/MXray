@@ -132,9 +132,12 @@ jobs:
           # Record the Xray-core version we shipped.
           echo "${{ steps.xray.outputs.version }}" > .xray-version
 
-          # Commit + push.
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Commit + push as the repository owner, so the automated bump does not add a
+          # second name to the contributor list for what is a one-person project.
+          # The GitHub-provided noreply address is what links a commit to the account, and it
+          # needs no email verification to keep working.
+          git config user.name  "Moein"
+          git config user.email "157242229+themoein100@users.noreply.github.com"
           git add Package.swift .xray-version
           git commit -m "Auto-release ${NEXT}: Xray-core ${{ steps.xray.outputs.version }}"
           git push origin HEAD:${GITHUB_REF_NAME}
