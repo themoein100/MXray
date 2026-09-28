@@ -78,7 +78,7 @@ your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/themoein100/MXray.git", from: "1.0.0")
+    .package(url: "https://github.com/themoein100/MXray.git", from: "1.1.0")
 ]
 ```
 
@@ -230,11 +230,16 @@ then upload the zip to a GitHub Release and set the matching `url` + `checksum` 
 ### Automated releases
 
 A scheduled GitHub Actions workflow ([`auto-update-libxray.yml`](.github/workflows/auto-update-libxray.yml))
-keeps MXray tracking upstream Xray-core with no human in the loop. Weekly, it builds
-`LibXray.xcframework` from source ([themoein100/libXray-apple](https://github.com/themoein100/libXray-apple))
-on a macOS runner against the latest Xray-core, and — when the version changed — updates
-`Package.swift`, commits, and publishes a new release with the framework attached. You can
-also run it on demand from the **Actions** tab (optionally pinning a specific Xray-core version).
+builds `LibXray.xcframework` weekly on a macOS runner from
+[themoein100/libXray-apple](https://github.com/themoein100/libXray-apple) against
+[themoein100/Xray-core](https://github.com/themoein100/Xray-core): upstream Xray-core plus the
+patches that keep a Network Extension under its memory limit (short-lived UDP DNS sessions, UDP
+flows released on stop, bounded gVisor and XHTTP HTTP/2 buffers, ENOBUFS retry on Darwin TUN
+writes). When the core version or its patches change, it updates `Package.swift`, commits, and
+publishes a new release with the framework attached. You can also run it on demand from the
+**Actions** tab, optionally naming a branch or tag of the fork.
+
+A new upstream Xray-core release reaches MXray once the fork's default branch is rebased onto it.
 
 ## Security
 

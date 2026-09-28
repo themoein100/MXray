@@ -3,11 +3,16 @@ name: Auto-update LibXray
 # Keeps MXray tracking the latest Xray-core, forever, with no human in the loop.
 #
 # Weekly (and on manual dispatch) this:
-#   1. checks out the LibXray source (themoein100/libXray-apple)
-#   2. bumps Xray-core to the latest release and builds LibXray.xcframework on a macOS runner
-#   3. if the Xray-core version changed since the last MXray release, it zips the framework,
+#   1. checks out the LibXray source (themoein100/libXray-apple) and the patched core
+#      (themoein100/Xray-core, default branch: upstream release + iOS memory/TUN patches)
+#   2. builds LibXray.xcframework against that core on a macOS runner
+#   3. if the core version changed since the last MXray release, it zips the framework,
 #      updates Package.swift, commits + pushes to this repo, and publishes a new GitHub Release
 #      with the framework attached.
+#
+# A new upstream Xray-core release reaches MXray once the fork's default branch has been
+# rebased onto it. Building from upstream directly would ship without the patches, and
+# `go get xray-core@latest` resolves to the stale v1.260327.0 module version anyway.
 #
 # It writes only to THIS repository, using the built-in GITHUB_TOKEN — no personal token needed.
 # Because it commits when there is something new, the scheduled trigger never goes stale.
@@ -18,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       xray_ref:
-        description: "Xray-core version to build (e.g. v1.8.24). Blank = latest release."
+        description: "Branch or tag of themoein100/Xray-core to build. Blank = default branch."
         required: false
         default: ""
       force:
@@ -35,6 +40,7 @@ concurrency:
 
 env:
   LIBXRAY_REPO: themoein100/libXray-apple
+  XRAY_REPO: themoein100/Xray-core
 
 jobs:
   build-and-release:
@@ -51,28 +57,39 @@ jobs:
           repository: ${{ env.LIBXRAY_REPO }}
           path: libxray-src
 
+      - name: Checkout patched Xray-core
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.XRAY_REPO }}
+          ref: ${{ github.event.inputs.xray_ref }}
+          path: Xray-core   # build.py uses a sibling ./Xray-core as the core
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: libxray-src/go.mod
+          go-version-file: Xray-core/go.mod
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Bump Xray-core to target version
+      - name: Point LibXray at the patched core
         id: xray
         working-directory: libxray-src
         run: |
           set -euo pipefail
-          REF="${{ github.event.inputs.xray_ref }}"
-          if [ -z "$REF" ]; then REF="latest"; fi
-          echo "Requesting xray-core@$REF"
-          go get "github.com/xtls/xray-core@$REF"
+          go mod edit -replace "github.com/xtls/xray-core=${GITHUB_WORKSPACE}/Xray-core"
           go mod tidy
-          VERSION="$(go list -m -f '{{.Version}}' github.com/xtls/xray-core)"
-          echo "Resolved xray-core version: $VERSION"
+          # The core's own version (e.g. 26.9.9) plus the fork commit, so a new patch on the
+          # same upstream release also produces a new MXray build.
+          CORE="${GITHUB_WORKSPACE}/Xray-core/core/core.go"
+          X="$(sed -nE 's/.*Version_x byte = ([0-9]+).*/\1/p' "$CORE")"
+          Y="$(sed -nE 's/.*Version_y byte = ([0-9]+).*/\1/p' "$CORE")"
+          Z="$(sed -nE 's/.*Version_z byte = ([0-9]+).*/\1/p' "$CORE")"
+          SHA="$(git -C "${GITHUB_WORKSPACE}/Xray-core" rev-parse --short=8 HEAD)"
+          VERSION="v${X}.${Y}.${Z}+${SHA}"
+          echo "Building against Xray-core $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Decide whether a new release is needed
