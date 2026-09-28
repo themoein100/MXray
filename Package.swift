@@ -18,8 +18,8 @@ import PackageDescription
 
 let libXrayTarget: Target = .binaryTarget(
     name: "LibXray",
-    url: "https://github.com/themoein100/MXray/releases/download/v1.1.0/LibXray.xcframework.zip",
-    checksum: "3555e4ef033c36b9789465dd6636f6d21c1a44b095f7e8a77d174122d4e0370d"
+    url: "https://github.com/themoein100/MXray/releases/download/v1.1.1/LibXray.xcframework.zip",
+    checksum: "c136ac39c38acb49b83ada5a86087969ab3faa054de7c6eb01366f6e8e409fd1"
 )
 
 // Local development variant — drop LibXray.xcframework into Frameworks/ (git-ignored)
@@ -34,7 +34,7 @@ let package = Package(
     name: "MXray",
     platforms: [
         .iOS(.v15),
-        .macOS(.v12)
+        .macOS(.v13)
     ],
     products: [
         .library(

@@ -64,7 +64,7 @@ under load. MXray packages all of that into one dependency:
 
 ## Requirements
 
-- iOS 15+ / macOS 12+
+- iOS 15+ / macOS 13+
 - Xcode 16+ (Swift 6 toolchain)
 - Your app must have the **Network Extensions** capability (Packet Tunnel) and an
   associated Packet Tunnel Provider extension target.
@@ -78,7 +78,7 @@ your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/themoein100/MXray.git", from: "1.1.0")
+    .package(url: "https://github.com/themoein100/MXray.git", from: "1.1.1")
 ]
 ```
 
